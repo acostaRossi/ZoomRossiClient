@@ -72,8 +72,8 @@ public class Controller implements Initializable {
 
     final int FRAME_SIZE = 400;
 
-    final String SERVER_IP = "139.59.138.199";
-    //final String SERVER_IP = "127.0.0.1";
+    //final String SERVER_IP = "139.59.138.199";
+    final String SERVER_IP = "127.0.0.1";
 
     int currVBox = 1;
 
@@ -281,8 +281,6 @@ public class Controller implements Initializable {
 
         Runnable runnable = () -> {
 
-            ByteBuffer imgFinalByte = null;
-
             while(!Thread.interrupted()) {
 
                 byte[] dtArray = new byte[FRAME_SIZE + (Integer.BYTES * 5) + 25];
@@ -307,11 +305,11 @@ public class Controller implements Initializable {
 
                 bbuffer.position(25);
 
-                // COUNT
+                // FRAME number
 
                 int count = bbuffer.getInt();
 
-                // IDX
+                // PART number
 
                 int index = bbuffer.getInt();
 
@@ -323,81 +321,104 @@ public class Controller implements Initializable {
 
                 int partSize = bbuffer.getInt();
 
-                // PART TOTAL
+                // PART TOTAL number
 
                 int partsTotal = bbuffer.getInt();
+
+                // estraggo la parte di frame dal datagram
 
                 byte[] bArrayImgPart = new byte[partSize];
 
                 bbuffer.get(bArrayImgPart);
 
-                if(index == 0) {
-                    imgFinalByte = ByteBuffer.allocate(totalImgSize);
+                // identifico il client
+
+                boolean isNewClient = true;
+
+                int clientIndex = 0;
+
+                for (Client client: clients) {
+                    // se stesso ip
+                    if(client.ip.equals(dtPacket.getAddress().getHostAddress())) {
+                        // se stessa porta
+                        if(client.port == dtPacket.getPort()) {
+                            isNewClient = false;
+                            break;
+                        }
+                    }
+                    clientIndex++;
                 }
 
-                if(imgFinalByte != null) {
+                // if is new user connected add new ImageView in UI
 
-                    imgFinalByte.position(index * FRAME_SIZE);
+                if(isNewClient) {
+
+                    Client newClient = new Client(dtPacket.getAddress().getHostAddress(), dtPacket.getPort());
+                    clients.add(newClient);
+
+                    Platform.runLater(() -> {
+
+                        VBox vbox = getVbox();
+                        Label lblUser = new Label();
+                        newClient.lblUserName = lblUser;
+                        lblUser.setText(nickname);
+                        vbox.getChildren().add(lblUser);
+                        ImageView imageView = new ImageView();
+                        imageView.setFitWidth(200);
+                        imageView.setFitHeight(150);
+                        imageView.setX(0);
+                        imageView.setY(0);
+                        vbox.getChildren().add(imageView);
+                        imageView.imageProperty().bind(newClient.imageReceivedProperty);
+                    });
+                }
+
+                // se è il primo pezzo di immagine
+
+                if(index == 0) {
+
+                    // inzializzo un nuovo byte buffer che conterrà l'immagine
+
+                    clients.get(clientIndex).imgFinalByte = ByteBuffer.allocate(totalImgSize);
+                }
+
+                if(clients.get(clientIndex).imgFinalByte != null) {
+
+                    // mi posiziono nella posizione corretta del byte buffer
+
+                    clients.get(clientIndex).imgFinalByte.position(index * FRAME_SIZE);
+
+                    // aggiungo al byte buffer il pezzo di immagine
 
                     try {
-                        imgFinalByte.put(bArrayImgPart);
+                        clients.get(clientIndex).imgFinalByte.put(bArrayImgPart);
                     } catch (BufferOverflowException e) {
                         e.printStackTrace();
                     }
 
+                    // se è l'ultimo pezzo dell'immagine
+
                     if(index == partsTotal - 1) {
 
-                        //
-                        // show image in UI
-                        //
+                        // controllo se l'immagine è completa
 
-                        int clientIndex = -1;
+                        if(totalImgSize <= clients.get(clientIndex).imgFinalByte.array().length) {
 
-                        for (Client client: clients) {
-                            if(client.ip.equals(dtPacket.getAddress().getHostAddress())) {
-                                clientIndex++;
-                            }
-                        }
-
-                        // if is new user connected add new ImageView in UI
-
-                        if(clientIndex == -1) {
-
-                            Client newClient = new Client(dtPacket.getAddress().getHostAddress(), dtPacket.getPort());
-                            clients.add(newClient);
-
-                            Platform.runLater(() -> {
-
-                                VBox vbox = getVbox();
-                                Label lblUser = new Label();
-                                newClient.lblUserName = lblUser;
-                                lblUser.setText(nickname);
-                                vbox.getChildren().add(lblUser);
-                                ImageView imageView = new ImageView();
-                                imageView.setFitWidth(200);
-                                imageView.setFitHeight(150);
-                                imageView.setX(0);
-                                imageView.setY(0);
-                                vbox.getChildren().add(imageView);
-                                imageView.imageProperty().bind(newClient.imageReceivedProperty);
-                            });
-
-                            clientIndex++;
-                        }
-
-                        // if image bytes are completed then compose the image and show it
-
-                        if(totalImgSize <= imgFinalByte.array().length) {
+                            // crea l'immagine a partire dal byte array
 
                             BufferedImage bImage = null;
                             try {
-                                bImage = ImageIO.read(new ByteArrayInputStream(imgFinalByte.array()));
+                                bImage = ImageIO.read(new ByteArrayInputStream(clients.get(clientIndex).imgFinalByte.array()));
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
 
                             if(bImage != null) {
+
+                                // mostra l'immagine nella view corrispondente al client
+
                                 Image mainimage = SwingFXUtils.toFXImage(bImage, null);
+
                                 clients.get(clientIndex).imageReceivedProperty.set(mainimage);
 
                                 if(clients.get(clientIndex).lblUserName != null) {
@@ -410,7 +431,7 @@ public class Controller implements Initializable {
                             }
                         }
 
-                        imgFinalByte.clear();
+                        clients.get(clientIndex).imgFinalByte.clear();
                     }
                 }
             }
